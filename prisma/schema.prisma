@@ -1,0 +1,381 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Restaurant {
+  id             Int                 @id @default(autoincrement())
+  name           String
+  slug           String              @unique
+  isActive       Boolean             @default(true)
+  tables         Table[]
+  sessions       Session[]
+  orders         Order[]
+  payments       Payment[]
+  categories     MenuCategory[]
+  menuItems      MenuItem[]
+  splitPlans     SplitPlan[]
+  kitchenTickets KitchenTicket[]
+  settings       RestaurantSettings?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  users          User[]
+}
+
+model RestaurantSettings {
+  id                                   Int        @id @default(autoincrement())
+  restaurantId                         Int        @unique
+  splitEnabled                         Boolean    @default(true)
+  manualCashEnabled                    Boolean    @default(true)
+  manualPosEnabled                     Boolean    @default(true)
+  customerCustomAmountEnabled          Boolean    @default(true)
+  fullSettlementEnabled                Boolean    @default(true)
+  waiterCustomAmountEnabled            Boolean    @default(true)
+  billRequestEnabled                   Boolean    @default(true)
+  kitchenTicketEnabled                 Boolean    @default(true)
+  bulkApproveEnabled                   Boolean    @default(true)
+  cleaningFlowEnabled                  Boolean    @default(true)
+  restaurant                           Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  createdAt                            DateTime   @default(now())
+  updatedAt                            DateTime   @updatedAt
+  kitchenPrintEnabled                  Boolean    @default(true)
+  requireWaiterApprovalForKitchenPrint Boolean    @default(false)
+  kitchenPrintDelayMinutes             Int        @default(1)
+}
+
+model Table {
+  id             Int             @id @default(autoincrement())
+  restaurantId   Int
+  number         Int
+  token          String          @unique
+  status         TableStatus     @default(AVAILABLE)
+  paymentEnabled Boolean         @default(false)
+  billRequested  Boolean         @default(false)
+  restaurant     Restaurant      @relation(fields: [restaurantId], references: [id])
+  sessions       Session[]
+  orders         Order[]
+  payments       Payment[]
+  splitPlans     SplitPlan[]
+  kitchenTickets KitchenTicket[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  billRequestedAt DateTime?
+  @@unique([restaurantId, number])
+}
+
+model Session {
+  id             String          @id @default(cuid())
+  restaurantId   Int
+  tableId        Int
+  status         SessionStatus   @default(OPEN)
+  billingMode    BillingMode     @default(NORMAL)
+  startedAt      DateTime        @default(now())
+  closedAt       DateTime?
+  restaurant     Restaurant      @relation(fields: [restaurantId], references: [id])
+  table          Table           @relation(fields: [tableId], references: [id])
+  orders         Order[]
+  payments       Payment[]
+  splitPlans     SplitPlan[]
+  kitchenTickets KitchenTicket[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Order {
+  id                 Int                 @id @default(autoincrement())
+  restaurantId       Int
+  tableId            Int
+  sessionId          String?
+  status             OrderStatus         @default(OPEN)
+  source             OrderSource         @default(QR)
+  externalProvider   String?
+  externalOrderId    String?
+  totalAmount        Int                 @default(0)
+  notes              String?
+  restaurant         Restaurant          @relation(fields: [restaurantId], references: [id])
+  table              Table               @relation(fields: [tableId], references: [id])
+  session            Session?            @relation(fields: [sessionId], references: [id])
+  items              OrderItem[]
+  allocations        PaymentAllocation[]
+  kitchenTicketItems KitchenTicketItem[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  kitchenPrintedAt   DateTime?
+
+  @@unique([externalProvider, externalOrderId])
+}
+
+model OrderItem {
+  id                 Int                 @id @default(autoincrement())
+  orderId            Int
+  menuItemId         Int
+  nameSnapshot       String
+  unitPriceAmount    Int
+  quantity           Int
+  lineTotalAmount    Int
+  order              Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem           MenuItem            @relation(fields: [menuItemId], references: [id])
+  allocations        PaymentAllocation[]
+  kitchenTicketItems KitchenTicketItem[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  note               String?
+  payments           PaymentItem[]
+}
+
+model Payment {
+  id                Int                 @id @default(autoincrement())
+  restaurantId      Int
+  tableId           Int
+  sessionId         String?
+  splitPlanId       Int?
+  provider          String
+  providerPaymentId String?             @unique
+  idempotencyKey    String              @unique
+  method            PaymentMethod
+  splitType         PaymentSplitType
+  amount            Int
+  currency          String              @default("TRY")
+  status            PaymentStatus       @default(PENDING)
+  metadata          Json?
+  restaurant        Restaurant          @relation(fields: [restaurantId], references: [id])
+  table             Table               @relation(fields: [tableId], references: [id])
+  session           Session?            @relation(fields: [sessionId], references: [id])
+  splitPlan         SplitPlan?          @relation(fields: [splitPlanId], references: [id])
+  allocations       PaymentAllocation[]
+  events            PaymentEvent[]
+  paidSplitShares   SplitShare[]        @relation("SplitSharePaidByPayment")
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  items PaymentItem[]
+}
+
+model PaymentAllocation {
+  id              Int       @id @default(autoincrement())
+  paymentId       Int
+  orderId         Int
+  orderItemId     Int
+  allocatedAmount Int
+  payment         Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  order           Order     @relation(fields: [orderId], references: [id])
+  orderItem       OrderItem @relation(fields: [orderItemId], references: [id])
+  createdAt       DateTime  @default(now())
+}
+
+model PaymentEvent {
+  id              Int      @id @default(autoincrement())
+  paymentId       Int
+  eventType       String
+  providerEventId String?
+  payload         Json?
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+}
+
+model SplitPlan {
+  id              Int             @id @default(autoincrement())
+  restaurantId    Int
+  tableId         Int
+  sessionId       String
+  type            SplitPlanType
+  status          SplitPlanStatus @default(ACTIVE)
+  personCount     Int
+  totalAmount     Int
+  remainingAmount Int
+  restaurant      Restaurant      @relation(fields: [restaurantId], references: [id])
+  table           Table           @relation(fields: [tableId], references: [id])
+  session         Session         @relation(fields: [sessionId], references: [id])
+  shares          SplitShare[]
+  payments        Payment[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model SplitShare {
+  id              Int              @id @default(autoincrement())
+  splitPlanId     Int
+  amount          Int
+  remaining       Int
+  status          SplitShareStatus @default(PENDING)
+  paidByPaymentId Int?
+  splitPlan       SplitPlan        @relation(fields: [splitPlanId], references: [id], onDelete: Cascade)
+  paidByPayment   Payment?         @relation("SplitSharePaidByPayment", fields: [paidByPaymentId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model KitchenTicket {
+  id             Int                 @id @default(autoincrement())
+  restaurantId   Int
+  tableId        Int?
+  sessionId      String?
+  orderId        Int?
+  source         OrderSource         @default(QR)
+  status         KitchenTicketStatus @default(PENDING)
+  printedAt      DateTime?
+  acknowledgedAt DateTime?
+  completedAt    DateTime?
+  restaurant     Restaurant          @relation(fields: [restaurantId], references: [id])
+  table          Table?              @relation(fields: [tableId], references: [id])
+  session        Session?            @relation(fields: [sessionId], references: [id])
+  items          KitchenTicketItem[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+}
+
+model KitchenTicketItem {
+  id              Int                     @id @default(autoincrement())
+  kitchenTicketId Int
+  orderId         Int
+  orderItemId     Int
+  nameSnapshot    String
+  quantity        Int
+  status          KitchenTicketItemStatus @default(PENDING)
+  kitchenTicket   KitchenTicket           @relation(fields: [kitchenTicketId], references: [id], onDelete: Cascade)
+  order           Order                   @relation(fields: [orderId], references: [id])
+  orderItem       OrderItem               @relation(fields: [orderItemId], references: [id])
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+}
+
+model MenuCategory {
+  id           Int        @id @default(autoincrement())
+  restaurantId Int
+  name         String
+  isAvailable  Boolean    @default(true)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  items        MenuItem[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model MenuItem {
+  id           Int          @id @default(autoincrement())
+  restaurantId Int
+  categoryId   Int
+  name         String
+  description  String?
+  priceAmount  Int
+  imageUrl     String?
+  isAvailable  Boolean      @default(true)
+  restaurant   Restaurant   @relation(fields: [restaurantId], references: [id])
+  category     MenuCategory @relation(fields: [categoryId], references: [id])
+  orderItems   OrderItem[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  email        String     @unique
+  password     String
+  role         String     @default("OWNER")
+  restaurantId Int
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+model PaymentItem {
+  id          Int      @id @default(autoincrement())
+  paymentId   Int
+  orderItemId Int
+  amount      Float
+
+  payment     Payment   @relation(fields: [paymentId], references: [id])
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+}
+
+
+
+
+enum SessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum BillingMode {
+  NORMAL
+  SPLIT_ACTIVE
+  CLOSED
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  DIRTY
+}
+
+enum OrderStatus {
+  OPEN
+  CONFIRMED
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderSource {
+  QR
+  IN_STORE
+  GETIR
+  TRENDYOL
+  YEMEKSEPETI
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  VOID
+}
+
+enum PaymentMethod {
+  ONLINE_CARD
+  CASH
+  POS
+}
+
+enum PaymentSplitType {
+  NONE
+  CUSTOM_AMOUNT
+  EQUAL_SPLIT
+  ITEM_BASED
+  SETTLEMENT
+}
+
+enum SplitPlanType {
+  EQUAL
+}
+
+enum SplitPlanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum SplitShareStatus {
+  PENDING
+  PAID
+  VOID
+}
+
+enum KitchenTicketStatus {
+  PENDING
+  PRINTED
+  ACKNOWLEDGED
+  COMPLETED
+  CANCELLED
+}
+
+enum KitchenTicketItemStatus {
+  PENDING
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
