@@ -17,7 +17,7 @@ export class OrdersService {
     private realtime: RealtimeGateway,
     private sessionsService: SessionsService,
     private printService: PrintService,
-  ) {}
+  ) { }
 
   findAll(user: AuthUser) {
     return this.prisma.order.findMany({
@@ -36,11 +36,12 @@ export class OrdersService {
   async findBySessionId(sessionId: string) {
     const session = await this.sessionsService.getSessionByIdOrThrow(sessionId);
 
-    if (session.status === 'OPEN') {
-      await this.sessionsService.validateCurrentOpenSession(sessionId);
-    }
-
     const financials = await this.sessionsService.getSessionFinancials(session.id);
+
+    // 🔥 Session kapandıysa veya hesap tamamen bittiyse müşteriye açık sipariş gösterme
+    if (session.status === 'CLOSED' || financials.remainingAmount <= 0) {
+      return [];
+    }
 
     return financials.orders
       .map((order) => ({

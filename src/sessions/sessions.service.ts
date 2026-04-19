@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 @Injectable()
 export class SessionsService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService, private realtime: RealtimeGateway,) { }
 
   private getDb(db?: Prisma.TransactionClient) {
     return db ?? this.prisma;
@@ -130,7 +130,10 @@ export class SessionsService {
     const currentSession = await this.getActiveSessionByTable(session.tableId);
 
     if (!currentSession || currentSession.id !== session.id) {
-      throw new BadRequestException('Eski session ile işlem yapılamaz');
+      return {
+        session: currentSession,
+        table: currentSession?.table,
+      };
     }
 
     return {
@@ -273,16 +276,8 @@ export class SessionsService {
       paidItemIds,
     };
   }
-
   async getPublicSessionState(sessionId: string, db?: Prisma.TransactionClient) {
     const session = await this.getSessionByIdOrThrow(sessionId, db);
-
-    if (session.status === 'OPEN') {
-      const currentSession = await this.getActiveSessionByTable(session.tableId);
-      if (!currentSession || currentSession.id !== session.id) {
-        throw new BadRequestException('Eski session ile işlem yapılamaz');
-      }
-    }
 
     const table = session.table;
     const financials = await this.getSessionFinancials(session.id, db);
@@ -300,7 +295,9 @@ export class SessionsService {
         billRequested: table.billRequested,
       },
       billingMode:
-        session.status === 'CLOSED' || financials.remainingAmount <= 0 ? 'CLOSED' : session.billingMode,
+        session.status === 'CLOSED' || financials.remainingAmount <= 0
+          ? 'CLOSED'
+          : session.billingMode,
       splitActive: !!financials.activeSplitPlan,
       totalAmount: financials.totalAmount,
       paidAmount: financials.paidAmount,
@@ -309,6 +306,7 @@ export class SessionsService {
   }
 
   async syncSessionLifecycle(sessionId: string, db?: Prisma.TransactionClient) {
+
     const tx = this.getDb(db);
     const { session, table } = await this.validateCurrentOpenSession(sessionId, db);
     const financials = await this.getSessionFinancials(session.id, db);
@@ -385,7 +383,11 @@ export class SessionsService {
         billRequestedAt: null,
       },
     });
-
+    this.realtime.sendTableUpdate(table.id, {
+      type: 'SESSION_UPDATED',
+      tableId: table.id,
+      sessionId: session.id,
+    });
     return {
       sessionClosed: true,
       remainingAmount: 0,
@@ -411,7 +413,8 @@ export class SessionsService {
 
     let session = await this.findOpenSessionByTable(table.id);
 
-    if (!session) {
+
+    if (!session || session.status === 'CLOSED') {
       session = await this.getOrCreateActiveSession(table.id);
     }
 

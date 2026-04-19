@@ -40,6 +40,11 @@ function App() {
     });
 
   const refresh = async (sessionId, restaurantId) => {
+    if (!sessionId) {
+      console.log("⚠️ session yok → initialize");
+      await initialize();
+      return;
+    }
     const [menuRes, ordersRes, billRes, splitsRes, sessionRes] = await Promise.all([
       apiFetch(`/menu?restaurantId=${restaurantId}`),
       apiFetch(`/orders/session/${sessionId}`),
@@ -125,17 +130,21 @@ function App() {
   }, [tableToken]);
 
   useEffect(() => {
-    if (!session?.table?.id) return undefined;
-
     const socket = io(API_URL, { transports: ['websocket'] });
-    socket.emit('joinTable', { tableId: session.table.id });
-    socket.on(`table-${session.table.id}-updated`, () => {
-      refresh(session.sessionId || session.token, session.restaurantId).catch(() => { });
+
+    socket.onAny(async (eventName, event) => {
+      console.log("🔥 realtime:", eventName, event);
+
+      if (event?.type === "SESSION_UPDATED") {
+        await initialize();
+        return;
+      }
+
+      await refresh(session?.sessionId || session?.token, session?.restaurantId);
     });
 
     return () => socket.disconnect();
-  }, [session?.table?.id, session?.sessionId, session?.token, session?.restaurantId]);
-
+  }, []); // 🔥 KRİTİK
   const activeSessionId = session?.sessionId || session?.token;
   const paymentEnabled = !!session?.table?.paymentEnabled;
   const billClosed =
