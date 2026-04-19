@@ -192,7 +192,7 @@ let OrdersService = class OrdersService {
                 type: 'ORDER_CREATED',
                 tableId: table.id,
                 sessionId: session.id,
-                orderId: updatedOrder.id,
+                order: updatedOrder,
             });
             return updatedOrder;
         });
@@ -272,10 +272,14 @@ let OrdersService = class OrdersService {
             where: { id: orderId },
             data: { totalAmount },
         });
+        const fullOrder = await this.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { items: true },
+        });
         this.realtime.sendTableUpdate(order.tableId, {
             type: 'ORDER_UPDATED',
-            orderId,
             tableId: order.tableId,
+            order: fullOrder,
         });
         return { success: true };
     }
@@ -321,11 +325,14 @@ let OrdersService = class OrdersService {
         if (updatedOrder.status === 'CONFIRMED' && order.restaurant?.settings?.kitchenPrintEnabled) {
             await this.printService.printOrderIfNeeded(order.id);
         }
+        const fullOrder = await this.prisma.order.findUnique({
+            where: { id: order.id },
+            include: { items: true },
+        });
         this.realtime.sendTableUpdate(order.tableId, {
             type: 'ORDER_STATUS_UPDATED',
-            orderId: order.id,
-            status: updatedOrder.status,
             tableId: order.tableId,
+            order: fullOrder,
         });
         return updatedOrder;
     }

@@ -130,17 +130,49 @@ function App() {
   }, [tableToken]);
 
   useEffect(() => {
-    const socket = io(API_URL, { transports: ['websocket'] });
+    const socket = io(API_URL, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+    });
+    socket.on("connect_error", (err) => {
+      console.log("⚠️ reconnecting...");
+    });
 
+    socket.on("connect", () => {
+      console.log("🟢 socket connected");
+    });
+
+    socket.on("disconnect", () => {
+      console.log("🔴 socket disconnected");
+    });
+
+    socket.on("reconnect", async () => {
+      console.log("🟡 socket reconnected → sync");
+      await initialize();
+    });
     socket.onAny(async (eventName, event) => {
-      console.log("🔥 realtime:", eventName, event);
+      console.log(" realtime:", eventName, event);
 
-      if (event?.type === "SESSION_UPDATED") {
-        await initialize();
+      if (event?.type === "ORDER_CREATED" && event?.order) {
+        setOrders((prev) => [event.order, ...prev]);
         return;
       }
 
-      // 🔥 SADECE PAYMENT UPDATE
+      if (event?.type === "ORDER_UPDATED" && event?.order) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === event.order.id ? event.order : o))
+        );
+        return;
+      }
+
+      if (event?.type === "ORDER_STATUS_UPDATED" && event?.order) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === event.order.id ? event.order : o))
+        );
+        return;
+      }
+
       if (event?.type === "PAYMENT_UPDATED") {
         setBill((prev) => ({
           ...prev,
@@ -150,8 +182,17 @@ function App() {
         return;
       }
 
-      // diğer eventler fallback
-      await initialize();
+      // 🔥 SADECE BİLMEDİĞİMİZ EVENTLER
+      const safeEvents = [
+        "ORDER_CREATED",
+        "ORDER_UPDATED",
+        "ORDER_STATUS_UPDATED",
+        "PAYMENT_UPDATED",
+      ];
+
+      if (!safeEvents.includes(event?.type)) {
+        await initialize();
+      }
     });
 
     return () => socket.disconnect();
