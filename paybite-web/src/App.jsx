@@ -140,11 +140,22 @@ function App() {
         return;
       }
 
-      await refresh(session?.sessionId || session?.token, session?.restaurantId);
+      // 🔥 SADECE PAYMENT UPDATE
+      if (event?.type === "PAYMENT_UPDATED") {
+        setBill((prev) => ({
+          ...prev,
+          remaining: event.remainingAmount ?? prev?.remaining,
+          paidAmount: event.paidAmount ?? prev?.paidAmount,
+        }));
+        return;
+      }
+
+      // diğer eventler fallback
+      await initialize();
     });
 
     return () => socket.disconnect();
-  }, []); // 🔥 KRİTİK
+  }, []);
   const activeSessionId = session?.sessionId || session?.token;
   const paymentEnabled = !!session?.table?.paymentEnabled;
   const billClosed =
